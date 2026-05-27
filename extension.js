@@ -1,16 +1,14 @@
 const vscode = require("vscode");
 const crypto = require("crypto");
 const fs = require("fs");
-const http = require("http");
 const https = require("https");
 const path = require("path");
-const { execFile, execFileSync, spawn } = require("child_process");
+const { execFile, spawn } = require("child_process");
 
 let currentTerminal;
 let statusBarItem;
 let lastRuntimeState;
 let extensionContext;
-let outputChannel;
 
 function isCancellation(error) {
   return (
@@ -44,13 +42,6 @@ function registerCommand(context, command, callback) {
 
 function getConfig() {
   return vscode.workspace.getConfiguration("ite");
-}
-
-function getOutputChannel() {
-  if (!outputChannel) {
-    outputChannel = vscode.window.createOutputChannel("iTE");
-  }
-  return outputChannel;
 }
 
 function getWorkspaceCwd() {
@@ -506,7 +497,7 @@ function updateStatusBar(runtime) {
   const installed = Boolean(runtime && runtime.installed);
   statusBarItem.text = installed ? "$(window) iTE" : "$(cloud-download) iTE";
   statusBarItem.tooltip = installed
-    ? `Open iTE in VS Code using the ${runtime.source} runtime`
+    ? `Open iTE terminal using the ${runtime.source} runtime`
     : "Install or configure the iTE runtime";
 }
 
@@ -517,8 +508,8 @@ function registerStatusBar(context) {
   );
   statusBarItem.name = "iTE";
   statusBarItem.text = "$(window) iTE";
-  statusBarItem.tooltip = "Open iTE in VS Code";
-  statusBarItem.command = "ite.openWebview";
+  statusBarItem.tooltip = "Open iTE terminal";
+  statusBarItem.command = "ite.openTerminal";
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 }
@@ -535,12 +526,12 @@ async function showWelcomeOnce(context) {
 
   if (runtime.installed) {
     const action = await vscode.window.showInformationMessage(
-      "iTE is ready in VS Code. Open the AI coding agent in a VS Code panel.",
+      "iTE is ready in VS Code. Open the AI coding agent in a dedicated terminal.",
       "Open iTE",
     );
 
     if (action === "Open iTE") {
-      await openWebview();
+      await openTerminal();
     }
     return;
   }
@@ -552,7 +543,10 @@ async function showWelcomeOnce(context) {
   );
 
   if (action === "Install Runtime") {
-    await installRuntime();
+    const installedRuntime = await installRuntime();
+    if (installedRuntime && installedRuntime.installed) {
+      await openTerminal();
+    }
   } else if (action === "Use Existing CLI") {
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
@@ -566,450 +560,10 @@ async function refreshRuntimeState() {
   setRuntimeState(runtime);
 }
 
-let currentWebviewPanel;
-let webServerProcess;
-let webServerUrl;
-let webServerCwd;
-let webServerOutput = "";
-
-function stopWebServer() {
-  const child = webServerProcess;
-  webServerProcess = undefined;
-  webServerUrl = undefined;
-  webServerCwd = undefined;
-
-  if (!child || child.killed) {
-    return;
-  }
-
-  try {
-    if (process.platform === "win32") {
-      execFileSync("taskkill.exe", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-      });
-      return;
-    }
-    child.kill("SIGTERM");
-    setTimeout(() => {
-      if (!child.killed) {
-        child.kill("SIGKILL");
-      }
-    }, 1500);
-  } catch (error) {
-    getOutputChannel().appendLine(
-      `Failed to stop iTE webview runtime: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-}
-
-async function stopWebviewRuntime() {
-  if (currentWebviewPanel) {
-    currentWebviewPanel.dispose();
-    return;
-  }
-  stopWebServer();
-}
-
-function appendRuntimeOutput(source, data) {
-  const text = String(data || "");
-  if (!text) {
-    return;
-  }
-  webServerOutput += text;
-  if (webServerOutput.length > 12000) {
-    webServerOutput = webServerOutput.slice(-12000);
-  }
-  getOutputChannel().append(`[${source}] ${text}`);
-}
-
-function waitForReadyLine(child, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let buffer = "";
-    const timer = setTimeout(() => {
-      finish(
-        new Error(
-          `Timed out waiting for iTE webview runtime to start.\n${webServerOutput}`,
-        ),
-      );
-    }, timeoutMs);
-
-    function finish(error, ready) {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      child.off("error", onError);
-      child.off("exit", onExit);
-      if (error) {
-        reject(error);
-      } else {
-        resolve(ready);
-      }
-    }
-
-    function inspectLine(line) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{")) {
-        return;
-      }
-      try {
-        const payload = JSON.parse(trimmed);
-        if (payload && payload.type === "ready" && payload.url) {
-          finish(undefined, payload);
-        }
-      } catch {
-        // Non-JSON server output is expected after the ready line.
-      }
-    }
-
-    function onStdout(data) {
-      appendRuntimeOutput("stdout", data);
-      buffer += String(data);
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        inspectLine(line);
-      }
-    }
-
-    function onStderr(data) {
-      appendRuntimeOutput("stderr", data);
-    }
-
-    function onError(error) {
-      finish(error);
-    }
-
-    function onExit(code, signal) {
-      finish(
-        new Error(
-          `iTE webview runtime exited before it was ready (code=${code}, signal=${signal}).\n${webServerOutput}`,
-        ),
-      );
-    }
-
-    child.stdout.on("data", onStdout);
-    child.stderr.on("data", onStderr);
-    child.on("error", onError);
-    child.on("exit", onExit);
-  });
-}
-
-function waitForHttpReady(url, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-
-  return new Promise((resolve, reject) => {
-    function attempt() {
-      const req = http.get(url, (response) => {
-        response.resume();
-        if (response.statusCode && response.statusCode < 500) {
-          resolve();
-          return;
-        }
-        retry();
-      });
-
-      req.setTimeout(1000, () => {
-        req.destroy();
-        retry();
-      });
-
-      req.on("error", retry);
-    }
-
-    function retry() {
-      if (Date.now() >= deadline) {
-        reject(new Error(`Timed out waiting for ${url} to respond.`));
-        return;
-      }
-      setTimeout(attempt, 150);
-    }
-
-    attempt();
-  });
-}
-
-async function startWebServer(runtime, cwd, progress) {
-  if (webServerProcess && webServerUrl && webServerCwd === cwd) {
-    return webServerUrl;
-  }
-
-  stopWebServer();
-  webServerOutput = "";
-  progress.report({ message: "Starting iTE runtime..." });
-
-  const args = [
-    "--cwd",
-    cwd,
-    ...getIteArgs(),
-    "serve-vscode",
-    "--host",
-    "127.0.0.1",
-    "--port",
-    "0",
-  ];
-
-  const child = spawn(runtime.executable, args, {
-    cwd,
-    detached: false,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  webServerProcess = child;
-  webServerCwd = cwd;
-
-  child.on("exit", (code, signal) => {
-    if (webServerProcess === child) {
-      webServerProcess = undefined;
-      webServerUrl = undefined;
-      webServerCwd = undefined;
-      if (currentWebviewPanel) {
-        currentWebviewPanel.webview.html = getWebviewErrorHtml(
-          `iTE webview runtime stopped (code=${code}, signal=${signal}).`,
-        );
-      }
-    }
-  });
-
-  const ready = await waitForReadyLine(child, 20000);
-  webServerUrl = ready.url;
-
-  progress.report({ message: "Waiting for webview..." });
-  await waitForHttpReady(webServerUrl, 10000);
-  return webServerUrl;
-}
-
-async function openWebview() {
-  const runtime = await ensureRuntimeOrPrompt();
-  if (!runtime || !runtime.installed) {
-    return;
-  }
-
-  // If webview already open, show it
-  if (currentWebviewPanel) {
-    currentWebviewPanel.reveal();
-    return;
-  }
-
-  // Get workspace CWD
-  const cwd = getWorkspaceCwd() || process.cwd();
-
-  return vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "Opening iTE in VS Code",
-      cancellable: false,
-    },
-    async (progress) => {
-      try {
-        const url = await startWebServer(runtime, cwd, progress);
-        progress.report({ message: "Creating VS Code panel..." });
-
-        // Create the webview panel
-        const panel = vscode.window.createWebviewPanel(
-          "ite",
-          "iTE",
-          vscode.ViewColumn.One,
-          getWebviewOptions(url)
-        );
-
-        currentWebviewPanel = panel;
-
-        // Get the HTML for the webview
-        panel.webview.html = getWebviewHtml(panel.webview, url);
-
-        // Handle messages from the webview
-        panel.webview.onDidReceiveMessage(async (message) => {
-          if (message.type === "openExternal" && webServerUrl) {
-            await vscode.env.openExternal(vscode.Uri.parse(webServerUrl));
-          } else if (message.type === "openTerminal") {
-            await openNewTerminal();
-          } else if (message.type === "reload" && webServerUrl) {
-            panel.webview.html = getWebviewHtml(panel.webview, webServerUrl);
-          }
-        });
-
-        // Clean up when panel is closed
-        panel.onDidDispose(() => {
-          currentWebviewPanel = null;
-          stopWebServer();
-        });
-
-      } catch (error) {
-        stopWebServer();
-        throw error;
-      }
-    }
-  );
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function getNonce() {
-  return crypto.randomBytes(16).toString("base64");
-}
-
-function getWebviewOptions(url) {
-  const options = {
-    enableScripts: true,
-    retainContextWhenHidden: true,
-  };
-
-  try {
-    const parsed = new URL(url);
-    const port = Number(parsed.port);
-    if (Number.isInteger(port) && port > 0) {
-      options.portMapping = [
-        {
-          webviewPort: port,
-          extensionHostPort: port,
-        },
-      ];
-    }
-  } catch {
-    // Keep the basic webview options if URL parsing fails.
-  }
-
-  return options;
-}
-
-function getWebviewHtml(webview, url) {
-  const nonce = getNonce();
-  const escapedUrl = escapeHtml(url);
-  const cspSource = webview.cspSource;
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http://127.0.0.1:* http://localhost:*; img-src ${cspSource} data:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-  <title>iTE</title>
-  <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #0c1116;
-    }
-    .shell {
-      width: 100vw;
-      height: 100vh;
-      display: grid;
-      grid-template-rows: minmax(0, 1fr);
-    }
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      background: #0c1116;
-    }
-    .fallback {
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      display: flex;
-      gap: 8px;
-      opacity: 0;
-      transition: opacity 120ms ease;
-      pointer-events: none;
-    }
-    body:hover .fallback,
-    .fallback:focus-within {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    button {
-      appearance: none;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      border-radius: 6px;
-      background: rgba(15, 23, 42, 0.92);
-      color: #e5e7eb;
-      font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 7px 10px;
-      cursor: pointer;
-    }
-    button:hover {
-      background: rgba(30, 41, 59, 0.96);
-    }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <iframe src="${escapedUrl}" title="iTE" allow="clipboard-read; clipboard-write"></iframe>
-  </div>
-  <div class="fallback">
-    <button type="button" data-command="reload">Reload</button>
-    <button type="button" data-command="openExternal">Open in Browser</button>
-    <button type="button" data-command="openTerminal">Terminal Fallback</button>
-  </div>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    document.querySelectorAll("button[data-command]").forEach((button) => {
-      button.addEventListener("click", () => {
-        vscode.postMessage({ type: button.dataset.command });
-      });
-    });
-  </script>
-</body>
-</html>`;
-}
-
-function getWebviewErrorHtml(message) {
-  const escapedMessage = escapeHtml(message);
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: #0c1116;
-      color: #e5e7eb;
-      font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    main {
-      max-width: 520px;
-      padding: 24px;
-    }
-    h1 {
-      margin: 0 0 8px;
-      font-size: 18px;
-    }
-    p {
-      margin: 0;
-      color: #aeb8c5;
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>iTE stopped</h1>
-    <p>${escapedMessage}</p>
-  </main>
-</body>
-</html>`;
-}
-
 function activate(context) {
   extensionContext = context;
   registerCommand(context, "ite.openTerminal", openTerminal);
   registerCommand(context, "ite.openNewTerminal", openNewTerminal);
-  registerCommand(context, "ite.openWebview", openWebview);
-  registerCommand(context, "ite.stopWebview", stopWebviewRuntime);
   registerCommand(context, "ite.checkInstallation", checkInstallation);
   registerCommand(context, "ite.installRuntime", installRuntime);
   registerTerminalProfile(context);
@@ -1027,12 +581,7 @@ function activate(context) {
 }
 
 function deactivate() {
-  stopWebServer();
   statusBarItem = undefined;
-  if (outputChannel) {
-    outputChannel.dispose();
-    outputChannel = undefined;
-  }
 }
 
 module.exports = {

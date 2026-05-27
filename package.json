@@ -40,9 +40,7 @@
     "onCommand:ite.installRuntime",
     "onCommand:ite.openTerminal",
     "onCommand:ite.openNewTerminal",
-    "onCommand:ite.openWebview",
-    "onTerminalProfile:ite.terminalProfile",
-    "onCommand:ite.stopWebview"
+    "onTerminalProfile:ite.terminalProfile"
   ],
   "main": "./extension.js",
   "scripts": {
@@ -57,12 +55,12 @@
     "commands": [
       {
         "command": "ite.openTerminal",
-        "title": "Open iTE Terminal (Fallback)",
+        "title": "Open iTE",
         "category": "iTE"
       },
       {
         "command": "ite.openNewTerminal",
-        "title": "Open New iTE Terminal (Fallback)",
+        "title": "Open New iTE Terminal",
         "category": "iTE"
       },
       {
@@ -74,31 +72,18 @@
         "command": "ite.installRuntime",
         "title": "Install Managed Runtime",
         "category": "iTE"
-      },
-      {
-        "command": "ite.openWebview",
-        "title": "Open iTE in VS Code",
-        "category": "iTE"
-      },
-      {
-        "command": "ite.stopWebview",
-        "title": "Stop iTE Webview Runtime",
-        "category": "iTE"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "ite.openWebview"
+          "command": "ite.openTerminal"
         },
         {
           "command": "ite.checkInstallation"
         },
         {
           "command": "ite.installRuntime"
-        },
-        {
-          "command": "ite.stopWebview"
         }
       ],
       "terminal/title": [
@@ -137,12 +122,12 @@
           {
             "id": "open-ite",
             "title": "Open iTE",
-            "description": "Start iTE inside VS Code.\n[Open iTE](command:ite.openWebview)",
+            "description": "Start iTE in a dedicated VS Code terminal.\n[Open iTE](command:ite.openTerminal)",
             "media": {
               "markdown": "media/open-ite.md"
             },
             "completionEvents": [
-              "onCommand:ite.openWebview"
+              "onCommand:ite.openTerminal"
             ]
           }
         ]
