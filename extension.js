@@ -1,14 +1,14 @@
 const vscode = require("vscode");
-const crypto = require("crypto");
-const fs = require("fs");
-const https = require("https");
+const os = require("os");
 const path = require("path");
-const { execFile, spawn } = require("child_process");
+const { execFile } = require("child_process");
+
+const UNIX_INSTALL_SCRIPT_URL = "https://ite.kiishi.space/install.sh";
+const WINDOWS_INSTALL_SCRIPT_URL = "https://ite.kiishi.space/install.ps1";
 
 let currentTerminal;
 let statusBarItem;
 let lastRuntimeState;
-let extensionContext;
 
 function isCancellation(error) {
   return (
@@ -63,41 +63,33 @@ function getIteArgs() {
   return configuredArgs.filter((arg) => typeof arg === "string");
 }
 
-function preferManagedRuntime() {
-  return getConfig().get("preferManagedRuntime", true);
+function getDefaultInstalledExecutable() {
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(localAppData, "iTE", "bin", "ite.exe");
+  }
+
+  return path.join(os.homedir(), ".ite", "bin", "ite");
 }
 
-function useSystemFallback() {
-  return getConfig().get("useSystemFallback", true);
-}
+function getRuntimeCandidates() {
+  const configuredExecutable = getSystemExecutable();
+  const installedExecutable = getDefaultInstalledExecutable();
+  const candidates = [
+    {
+      executable: configuredExecutable,
+      source: configuredExecutable === "ite" ? "PATH" : "configured",
+    },
+  ];
 
-function getRuntimeManifestUrl() {
-  return getConfig().get(
-    "runtimeManifestUrl",
-    "https://ite.kiishi.space/releases/vscode/manifest.json",
-  );
-}
+  if (installedExecutable !== configuredExecutable) {
+    candidates.push({
+      executable: installedExecutable,
+      source: "installed",
+    });
+  }
 
-function getStorageRoot() {
-  return extensionContext.globalStorageUri.fsPath;
-}
-
-function getManagedRuntimeMetadataPath() {
-  return path.join(getStorageRoot(), "runtime", "runtime.json");
-}
-
-function getPlatformKey() {
-  const platform = process.platform;
-  const arch = {
-    arm64: "arm64",
-    x64: "x64",
-  }[process.arch] || process.arch;
-
-  return `${platform}-${arch}`;
-}
-
-function executableExists(executable) {
-  return fs.existsSync(executable);
+  return candidates;
 }
 
 function checkExecutable(executable) {
@@ -121,79 +113,24 @@ function checkExecutable(executable) {
   });
 }
 
-async function getManagedRuntime() {
-  const metadataPath = getManagedRuntimeMetadataPath();
-  if (!fs.existsSync(metadataPath)) {
-    return {
-      installed: false,
-      source: "managed",
-      message: "Managed runtime is not installed.",
-    };
-  }
-
-  try {
-    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
-    if (!metadata.executable || !executableExists(metadata.executable)) {
+async function resolveRuntime() {
+  const failed = [];
+  for (const candidate of getRuntimeCandidates()) {
+    const result = await checkExecutable(candidate.executable);
+    if (result.installed) {
       return {
-        installed: false,
-        source: "managed",
-        message: "Managed runtime metadata exists, but the executable is missing.",
+        ...result,
+        source: candidate.source,
       };
     }
-
-    const result = await checkExecutable(metadata.executable);
-    return {
-      ...result,
-      source: "managed",
-      version: metadata.version,
-    };
-  } catch (error) {
-    return {
-      installed: false,
-      source: "managed",
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function getSystemRuntime() {
-  if (!useSystemFallback()) {
-    return {
-      installed: false,
-      source: "system",
-      executable: getSystemExecutable(),
-      message: "System fallback is disabled.",
-    };
-  }
-
-  const result = await checkExecutable(getSystemExecutable());
-  return {
-    ...result,
-    source: "system",
-  };
-}
-
-async function resolveRuntime() {
-  const managed = await getManagedRuntime();
-  if (preferManagedRuntime() && managed.installed) {
-    return managed;
-  }
-
-  const system = await getSystemRuntime();
-  if (system.installed) {
-    return system;
-  }
-
-  if (managed.installed) {
-    return managed;
+    failed.push(result.message);
   }
 
   return {
     installed: false,
     source: "none",
-    message: managed.message || system.message || "No iTE runtime was found.",
-    managed,
-    system,
+    executable: getSystemExecutable(),
+    message: failed.find(Boolean) || "No iTE executable was found.",
   };
 }
 
@@ -225,21 +162,13 @@ async function ensureRuntimeOrPrompt() {
   }
 
   const action = await vscode.window.showWarningMessage(
-    "iTE needs a runtime before it can open in VS Code.",
-    "Install Runtime",
-    "Use System iTE",
+    "iTE is not installed yet. Install iTE to open it in VS Code.",
+    "Install iTE",
     "Open Docs",
   );
 
-  if (action === "Install Runtime") {
-    return installRuntime();
-  }
-
-  if (action === "Use System iTE") {
-    await vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "ite.executable",
-    );
+  if (action === "Install iTE") {
+    await installRuntime();
     return undefined;
   }
 
@@ -279,7 +208,7 @@ async function checkInstallation() {
 
   if (runtime.installed) {
     await vscode.window.showInformationMessage(
-      `iTE is ready using the ${runtime.source} runtime${
+      `iTE is ready using the ${runtime.source} executable${
         runtime.message ? `: ${runtime.message}` : "."
       }`,
     );
@@ -287,191 +216,72 @@ async function checkInstallation() {
   }
 
   const action = await vscode.window.showWarningMessage(
-    "No iTE runtime was found. Install the managed runtime from VS Code, or configure a system `ite` executable.",
-    "Install Runtime",
-    "Configure System Path",
+    "iTE is not installed yet. Install iTE to use it in VS Code.",
+    "Install iTE",
     "Open Docs",
   );
 
-  if (action === "Install Runtime") {
+  if (action === "Install iTE") {
     await installRuntime();
-  } else if (action === "Configure System Path") {
-    await vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "ite.executable",
-    );
   } else if (action === "Open Docs") {
     await vscode.env.openExternal(vscode.Uri.parse("https://ite.kiishi.space/docs"));
   }
 }
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function powershellQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function getInstallTerminalOptions() {
+  const options = {
+    name: "iTE",
+    cwd: getWorkspaceCwd(),
+  };
+
+  if (process.platform === "win32") {
+    options.shellPath = "powershell.exe";
+    options.shellArgs = ["-NoProfile"];
+  }
+
+  return options;
+}
+
+function getInstallAndRunCommand() {
+  const args = getIteArgs();
+
+  if (process.platform === "win32") {
+    const quotedArgs = args.map(powershellQuote).join(" ");
+    const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
+    return [
+      `irm ${WINDOWS_INSTALL_SCRIPT_URL} | iex`,
+      "$ite = Join-Path $env:LOCALAPPDATA 'iTE\\bin\\ite.exe'",
+      `if (Test-Path $ite) { & $ite${runArgs} } else { Write-Error 'iTE installed, but the executable was not found.' }`,
+    ].join("; ");
+  }
+
+  const quotedArgs = args.map(shellQuote).join(" ");
+  const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
+  return `curl -fsSL ${UNIX_INSTALL_SCRIPT_URL} | sh && "$HOME/.ite/bin/ite"${runArgs}`;
+}
+
 async function installRuntime() {
-  const manifestUrl = getRuntimeManifestUrl();
-  if (!manifestUrl) {
-    await vscode.window.showErrorMessage("Set `ite.runtimeManifestUrl` before installing the managed runtime.");
-    return undefined;
-  }
-
-  return vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "Installing iTE runtime",
-      cancellable: false,
-    },
-    async (progress) => {
-      progress.report({ message: "Fetching release manifest..." });
-      const manifest = await fetchJson(manifestUrl);
-      const platformKey = getPlatformKey();
-      const asset = manifest.assets && manifest.assets[platformKey];
-      if (!asset) {
-        throw new Error(`No iTE runtime is available for ${platformKey}.`);
-      }
-
-      const runtimeRoot = path.join(getStorageRoot(), "runtime");
-      const downloadsRoot = path.join(runtimeRoot, "downloads");
-      const installRoot = path.join(runtimeRoot, String(manifest.version));
-      fs.mkdirSync(downloadsRoot, { recursive: true });
-      fs.rmSync(installRoot, { recursive: true, force: true });
-      fs.mkdirSync(installRoot, { recursive: true });
-
-      const assetUrl = resolveAssetUrl(asset.url, manifestUrl);
-      const archivePath = path.join(downloadsRoot, path.basename(new URL(assetUrl).pathname));
-      progress.report({ message: "Downloading runtime..." });
-      await downloadFile(assetUrl, archivePath);
-
-      if (asset.sha256) {
-        progress.report({ message: "Verifying runtime..." });
-        verifySha256(archivePath, asset.sha256);
-      }
-
-      progress.report({ message: "Extracting runtime..." });
-      await extractArchive(archivePath, installRoot, asset.archiveType);
-
-      const executable = path.join(installRoot, "ite", asset.executable || defaultExecutableName());
-      if (!fs.existsSync(executable)) {
-        throw new Error(`Runtime executable was not found after extraction: ${executable}`);
-      }
-
-      if (process.platform !== "win32") {
-        fs.chmodSync(executable, 0o755);
-      }
-
-      const metadata = {
-        version: manifest.version,
-        source: "managed",
-        platform: platformKey,
-        executable,
-        installedAt: new Date().toISOString(),
-      };
-      fs.writeFileSync(getManagedRuntimeMetadataPath(), JSON.stringify(metadata, null, 2));
-
-      const runtime = await getManagedRuntime();
-      setRuntimeState(runtime);
-      await vscode.window.showInformationMessage("iTE runtime installed.");
-      return runtime;
-    },
+  const terminal = vscode.window.createTerminal(getInstallTerminalOptions());
+  currentTerminal = terminal;
+  terminal.show();
+  terminal.sendText(getInstallAndRunCommand(), true);
+  setRuntimeState({
+    installed: false,
+    source: "installer",
+    message: "Installing iTE in the terminal.",
+  });
+  await vscode.window.showInformationMessage(
+    "The iTE installer is running in the terminal. iTE will start there after installation completes.",
   );
-}
-
-function defaultExecutableName() {
-  return process.platform === "win32" ? "ite.exe" : "ite";
-}
-
-function resolveAssetUrl(assetUrl, manifestUrl) {
-  return new URL(assetUrl, manifestUrl).toString();
-}
-
-function fetchJson(url) {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, (response) => {
-        if (response.statusCode && response.statusCode >= 400) {
-          reject(new Error(`Request failed with HTTP ${response.statusCode}: ${url}`));
-          response.resume();
-          return;
-        }
-
-        let body = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk) => {
-          body += chunk;
-        });
-        response.on("end", () => {
-          try {
-            resolve(JSON.parse(body));
-          } catch (error) {
-            reject(error);
-          }
-        });
-      })
-      .on("error", reject);
-  });
-}
-
-function downloadFile(url, destination) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destination);
-    https
-      .get(url, (response) => {
-        if (response.statusCode && response.statusCode >= 400) {
-          file.close();
-          reject(new Error(`Download failed with HTTP ${response.statusCode}: ${url}`));
-          response.resume();
-          return;
-        }
-
-        response.pipe(file);
-        file.on("finish", () => {
-          file.close(resolve);
-        });
-      })
-      .on("error", (error) => {
-        file.close();
-        reject(error);
-      });
-  });
-}
-
-function verifySha256(filePath, expected) {
-  const hash = crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
-  if (hash.toLowerCase() !== String(expected).toLowerCase()) {
-    throw new Error("Downloaded iTE runtime failed checksum verification.");
-  }
-}
-
-function extractArchive(archivePath, destination, archiveType) {
-  if (archiveType === "zip" || archivePath.endsWith(".zip")) {
-    if (process.platform === "win32") {
-      return runCommand("powershell.exe", [
-        "-NoProfile",
-        "-Command",
-        "Expand-Archive",
-        "-LiteralPath",
-        archivePath,
-        "-DestinationPath",
-        destination,
-        "-Force",
-      ]);
-    }
-
-    return runCommand("unzip", ["-q", archivePath, "-d", destination]);
-  }
-
-  return runCommand("tar", ["-xzf", archivePath, "-C", destination]);
-}
-
-function runCommand(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "ignore" });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${command} exited with code ${code}`));
-      }
-    });
-  });
+  return undefined;
 }
 
 function registerTerminalProfile(context) {
@@ -480,7 +290,7 @@ function registerTerminalProfile(context) {
       async provideTerminalProfile() {
         const runtime = await ensureRuntimeOrPrompt();
         if (!runtime || !runtime.installed) {
-          throw new Error("No iTE runtime is available.");
+          throw new Error("No iTE executable is available.");
         }
 
         return new vscode.TerminalProfile(getTerminalOptions(runtime));
@@ -497,8 +307,10 @@ function updateStatusBar(runtime) {
   const installed = Boolean(runtime && runtime.installed);
   statusBarItem.text = installed ? "$(window) iTE" : "$(cloud-download) iTE";
   statusBarItem.tooltip = installed
-    ? `Open iTE terminal using the ${runtime.source} runtime`
-    : "Install or configure the iTE runtime";
+    ? `Open iTE terminal using the ${runtime.source} executable`
+    : runtime && runtime.message
+      ? runtime.message
+      : "Install iTE";
 }
 
 function registerStatusBar(context) {
@@ -537,21 +349,15 @@ async function showWelcomeOnce(context) {
   }
 
   const action = await vscode.window.showInformationMessage(
-    "Install the iTE runtime to use the AI coding agent directly inside VS Code.",
-    "Install Runtime",
-    "Use Existing CLI",
+    "Install iTE to use the AI coding agent directly inside VS Code.",
+    "Install iTE",
+    "Open Docs",
   );
 
-  if (action === "Install Runtime") {
-    const installedRuntime = await installRuntime();
-    if (installedRuntime && installedRuntime.installed) {
-      await openTerminal();
-    }
-  } else if (action === "Use Existing CLI") {
-    await vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "ite.executable",
-    );
+  if (action === "Install iTE") {
+    await installRuntime();
+  } else if (action === "Open Docs") {
+    await vscode.env.openExternal(vscode.Uri.parse("https://ite.kiishi.space/docs"));
   }
 }
 
@@ -561,7 +367,6 @@ async function refreshRuntimeState() {
 }
 
 function activate(context) {
-  extensionContext = context;
   registerCommand(context, "ite.openTerminal", openTerminal);
   registerCommand(context, "ite.openNewTerminal", openNewTerminal);
   registerCommand(context, "ite.checkInstallation", checkInstallation);

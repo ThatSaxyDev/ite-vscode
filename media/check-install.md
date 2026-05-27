@@ -1,8 +1,14 @@
-iTE is the Interactive Terminal Environment: an AI coding agent for your terminal.
+iTE is an AI coding agent for your terminal.
 
-This VS Code extension needs an iTE runtime before it can open iTE.
+This VS Code extension needs iTE before it can open iTE.
 
-The preferred VS Code path is a managed runtime installed by the extension. If you already use iTE in your terminal, the extension can also fall back to the system CLI:
+If iTE is not installed yet, the extension opens the official installer in a visible VS Code terminal:
+
+```bash
+curl -fsSL https://ite.kiishi.space/install.sh | sh
+```
+
+If you already use iTE in your terminal, the extension can use that executable:
 
 ```bash
 pipx install ite-agent

@@ -8,5 +8,5 @@
 - Add an `iTE` terminal profile.
 - Add a status-bar entry for opening iTE.
 - Add a first-run walkthrough.
-- Add managed runtime install flow.
+- Add official one-shot installer flow.
 - Keep system `ite` support for pipx and uv installs.

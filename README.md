@@ -1,8 +1,8 @@
 # iTE for VS Code
 
-iTE is the Interactive Terminal Environment: an AI coding agent for your terminal.
+iTE is an AI coding agent for your terminal.
 
-This extension brings iTE into VS Code by launching the iTE runtime in a dedicated VS Code terminal. It can use a VS Code managed runtime, or fall back to an existing system `ite` installation from `pipx` or another installer.
+This extension brings iTE into VS Code by launching iTE in a dedicated VS Code terminal. If iTE is not installed yet, the extension opens the official one-shot installer in that terminal.
 
 Learn more at [ite.kiishi.space](https://ite.kiishi.space).
 
@@ -11,12 +11,16 @@ Learn more at [ite.kiishi.space](https://ite.kiishi.space).
 - An `iTE` status-bar item for opening iTE in VS Code.
 - `iTE: Open iTE` in the Command Palette.
 - An `iTE` terminal profile in VS Code's terminal profile selector.
-- A first-run walkthrough that checks whether an iTE runtime is available.
-- One-click managed runtime installation when no runtime is available.
+- A first-run walkthrough that checks whether iTE is available.
+- One-click installation through the official iTE installer when no executable is available.
 
 ## Requirements
 
-The preferred VS Code path is the managed runtime. When you open iTE and no runtime is available, the extension can install the runtime into VS Code's extension storage.
+The extension expects the normal iTE executable. When you open iTE and no executable is available, the extension runs the official installer in a visible VS Code terminal:
+
+```bash
+curl -fsSL https://ite.kiishi.space/install.sh | sh
+```
 
 If you already have iTE installed on your system, the extension can use it:
 
@@ -50,72 +54,48 @@ Get-Command ite
 
 ## Runtime behavior
 
-If the extension cannot find a managed runtime or system `ite`, it does not silently fail. It will:
+If the extension cannot find `ite`, it does not silently fail. It will:
 
 - show a warning state in the status bar
-- offer to install the managed runtime
-- offer to configure a system `ite` executable
+- offer to install iTE
 - link to docs
 
 ## Runtime model
 
-iTE supports two install paths:
+iTE uses the same runtime in VS Code that it uses in a normal terminal. The official installer places the executable at `~/.ite/bin/ite` on macOS and Linux. The extension also checks that path directly, so a newly installed iTE can run even before VS Code's PATH has refreshed.
 
-- **Managed runtime for VS Code:** installed by the extension into VS Code extension storage.
-- **System CLI:** installed separately with `pipx install ite-agent` or `uv tool install ite-agent`.
-
-The managed runtime is preferred by default. You can disable that with `ite.preferManagedRuntime`.
-
-## Try it locally against the local iTE repo
+## Try it locally
 
 This repository includes a launch configuration that opens an empty Extension Development Host. From there, open or add the project folder you want iTE to run against.
 
-For local development, point the Extension Development Host at the sibling local iTE runtime:
-
-```text
-/Users/kiishidavid/Documents/Dev/Projects/itetheagt/ite/.venv/bin/ite
-```
-
-1. In the `ite` repo, make sure the local runtime is active and has the latest code:
+1. Open this extension repo in VS Code:
 
 ```bash
-cd /Users/kiishidavid/Documents/Dev/Projects/itetheagt/ite
-source .venv/bin/activate
-ite --version
-```
-
-2. Open this extension repo in VS Code:
-
-```bash
-cd /Users/kiishidavid/Documents/Dev/Projects/itetheagt/ite-vscode
+cd path/to/ite-vscode
 code .
 ```
 
-3. Press `F5` and choose `Run iTE Extension Against Local Runtime`.
-4. The Extension Development Host opens empty.
-5. In that new window, open or add the project folder you want iTE to use as its working directory.
-6. In the Extension Development Host, run `iTE: Open iTE` from the Command Palette.
+2. Press `F5` and choose `Run iTE Extension`.
+3. The Extension Development Host opens empty.
+4. In that new window, open or add the project folder you want iTE to use as its working directory.
+5. In the Extension Development Host, run `iTE: Open iTE` from the Command Palette.
 
-For local development, this setting goes in either:
+To test the production new-user path, leave the iTE settings unset. The extension will use its defaults and prompt to install iTE when no executable is available.
 
-- the opened project folder's `.vscode/settings.json`
-- the Extension Development Host's User Settings JSON
+To test against a locally built iTE executable, set `ite.executable` only in your local User Settings or an uncommitted workspace settings file:
 
 ```json
 {
-  "ite.executable": "/Users/kiishidavid/Documents/Dev/Projects/itetheagt/ite/.venv/bin/ite",
-  "ite.preferManagedRuntime": false,
-  "ite.useSystemFallback": true
+  "ite.executable": "/absolute/path/to/ite"
 }
 ```
 
-Before production packaging, remove those local workspace overrides or set production defaults back to:
+Before production packaging, remove those local overrides. Production should rely on the extension defaults:
 
 ```json
 {
   "ite.executable": "ite",
-  "ite.preferManagedRuntime": true,
-  "ite.useSystemFallback": true
+  "ite.args": []
 }
 ```
 
@@ -123,16 +103,13 @@ Before production packaging, remove those local workspace overrides or set produ
 
 - `iTE: Open iTE` opens the current iTE terminal if it exists, otherwise creates one and runs `ite`.
 - `iTE: Open New iTE Terminal` always creates a fresh terminal and runs `ite`.
-- `iTE: Check Installation` verifies that VS Code can find a managed or system runtime.
-- `iTE: Install Managed Runtime` downloads and installs the VS Code managed runtime.
+- `iTE: Check Installation` verifies that VS Code can find iTE.
+- `iTE: Install iTE` opens the official installer in a VS Code terminal.
 
 ## Settings
 
-- `ite.executable`: system executable used as fallback. Defaults to `ite`.
+- `ite.executable`: executable used to run iTE. Defaults to `ite`.
 - `ite.args`: arguments passed to the iTE executable. Defaults to `[]`.
-- `ite.runtimeManifestUrl`: manifest URL used to install the managed runtime.
-- `ite.preferManagedRuntime`: prefer the managed runtime when available. Defaults to `true`.
-- `ite.useSystemFallback`: use system `ite` when the managed runtime is unavailable. Defaults to `true`.
 
 Use this if iTE is not on the VS Code PATH, for example:
 

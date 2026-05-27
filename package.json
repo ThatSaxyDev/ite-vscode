@@ -1,6 +1,6 @@
 {
   "name": "ite-vscode",
-  "displayName": "iTE - Interactive Terminal Environment",
+  "displayName": "iTE",
   "description": "Run iTE, the AI coding agent for your terminal, directly inside VS Code.",
   "version": "0.0.1",
   "publisher": "kiishi",
@@ -14,7 +14,6 @@
   ],
   "keywords": [
     "ite",
-    "interactive terminal environment",
     "ai",
     "agent",
     "coding agent",
@@ -70,7 +69,7 @@
       },
       {
         "command": "ite.installRuntime",
-        "title": "Install Managed Runtime",
+        "title": "Install iTE",
         "category": "iTE"
       }
     ],
@@ -111,7 +110,7 @@
           {
             "id": "check-install",
             "title": "Check the iTE CLI",
-            "description": "Verify that VS Code can find or install an iTE runtime.\n[Check Installation](command:ite.checkInstallation)",
+            "description": "Verify that VS Code can find or install iTE.\n[Check Installation](command:ite.checkInstallation)",
             "media": {
               "markdown": "media/check-install.md"
             },
@@ -139,7 +138,7 @@
         "ite.executable": {
           "type": "string",
           "default": "ite",
-          "description": "System executable used as a fallback when the managed runtime is unavailable. Use a full path if VS Code cannot find `ite` on PATH."
+          "description": "iTE executable to run. Use a full path if VS Code cannot find `ite` on PATH."
         },
         "ite.args": {
           "type": "array",
@@ -148,21 +147,6 @@
             "type": "string"
           },
           "description": "Arguments passed to the iTE executable."
-        },
-        "ite.runtimeManifestUrl": {
-          "type": "string",
-          "default": "https://ite.kiishi.space/releases/vscode/manifest.json",
-          "description": "Manifest URL used to install the VS Code managed iTE runtime."
-        },
-        "ite.preferManagedRuntime": {
-          "type": "boolean",
-          "default": true,
-          "description": "Prefer the VS Code managed iTE runtime when available. Disable to prefer the system `ite` executable."
-        },
-        "ite.useSystemFallback": {
-          "type": "boolean",
-          "default": true,
-          "description": "Use the system `ite` executable when the managed runtime is not installed."
         }
       }
     }
