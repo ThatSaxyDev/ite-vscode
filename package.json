@@ -1,0 +1,185 @@
+{
+  "name": "ite-vscode",
+  "displayName": "iTE - Interactive Terminal Environment",
+  "description": "Run iTE, the AI coding agent for your terminal, directly inside VS Code.",
+  "version": "0.0.1",
+  "publisher": "kiishi",
+  "license": "MIT",
+  "icon": "media/ite-icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ite",
+    "interactive terminal environment",
+    "ai",
+    "agent",
+    "coding agent",
+    "terminal",
+    "cli",
+    "developer tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kiishidavid/ite-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/kiishidavid/ite-vscode/issues"
+  },
+  "homepage": "https://ite.kiishi.space",
+  "galleryBanner": {
+    "color": "#111827",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:ite.checkInstallation",
+    "onCommand:ite.installRuntime",
+    "onCommand:ite.openTerminal",
+    "onCommand:ite.openNewTerminal",
+    "onCommand:ite.openWebview",
+    "onTerminalProfile:ite.terminalProfile",
+    "onCommand:ite.stopWebview"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node --check extension.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.2"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "ite.openTerminal",
+        "title": "Open iTE Terminal (Fallback)",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.openNewTerminal",
+        "title": "Open New iTE Terminal (Fallback)",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.checkInstallation",
+        "title": "Check Installation",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.installRuntime",
+        "title": "Install Managed Runtime",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.openWebview",
+        "title": "Open iTE in VS Code",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.stopWebview",
+        "title": "Stop iTE Webview Runtime",
+        "category": "iTE"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "ite.openWebview"
+        },
+        {
+          "command": "ite.checkInstallation"
+        },
+        {
+          "command": "ite.installRuntime"
+        },
+        {
+          "command": "ite.stopWebview"
+        }
+      ],
+      "terminal/title": [
+        {
+          "command": "ite.openTerminal",
+          "group": "navigation"
+        }
+      ]
+    },
+    "terminal": {
+      "profiles": [
+        {
+          "id": "ite.terminalProfile",
+          "title": "iTE",
+          "icon": "terminal"
+        }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "ite.getStarted",
+        "title": "Get Started with iTE",
+        "description": "Open iTE directly from VS Code.",
+        "steps": [
+          {
+            "id": "check-install",
+            "title": "Check the iTE CLI",
+            "description": "Verify that VS Code can find or install an iTE runtime.\n[Check Installation](command:ite.checkInstallation)",
+            "media": {
+              "markdown": "media/check-install.md"
+            },
+            "completionEvents": [
+              "onCommand:ite.checkInstallation"
+            ]
+          },
+          {
+            "id": "open-ite",
+            "title": "Open iTE",
+            "description": "Start iTE inside VS Code.\n[Open iTE](command:ite.openWebview)",
+            "media": {
+              "markdown": "media/open-ite.md"
+            },
+            "completionEvents": [
+              "onCommand:ite.openWebview"
+            ]
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "iTE",
+      "properties": {
+        "ite.executable": {
+          "type": "string",
+          "default": "ite",
+          "description": "System executable used as a fallback when the managed runtime is unavailable. Use a full path if VS Code cannot find `ite` on PATH."
+        },
+        "ite.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to the iTE executable."
+        },
+        "ite.runtimeManifestUrl": {
+          "type": "string",
+          "default": "https://ite.kiishi.space/releases/vscode/manifest.json",
+          "description": "Manifest URL used to install the VS Code managed iTE runtime."
+        },
+        "ite.preferManagedRuntime": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prefer the VS Code managed iTE runtime when available. Disable to prefer the system `ite` executable."
+        },
+        "ite.useSystemFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use the system `ite` executable when the managed runtime is not installed."
+        }
+      }
+    }
+  }
+}
