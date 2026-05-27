@@ -257,6 +257,7 @@ function getInstallAndRunCommand() {
     const quotedArgs = args.map(powershellQuote).join(" ");
     const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
     return [
+      "$ErrorActionPreference = 'Stop'",
       `irm ${WINDOWS_INSTALL_SCRIPT_URL} | iex`,
       "$ite = Join-Path $env:LOCALAPPDATA 'iTE\\bin\\ite.exe'",
       `if (Test-Path $ite) { & $ite${runArgs} } else { Write-Error 'iTE installed, but the executable was not found.' }`,
@@ -264,8 +265,18 @@ function getInstallAndRunCommand() {
   }
 
   const quotedArgs = args.map(shellQuote).join(" ");
+  const script = [
+    "set -e",
+    'INSTALLER="$(mktemp)"',
+    'trap \'rm -f "$INSTALLER"\' EXIT',
+    `curl -fsSL ${UNIX_INSTALL_SCRIPT_URL} -o "$INSTALLER"`,
+    'sh "$INSTALLER"',
+    'ITE_BIN="$HOME/.ite/bin/ite"',
+    'test -x "$ITE_BIN" || { echo "iTE installer finished, but $ITE_BIN was not found." >&2; exit 1; }',
+    'exec "$ITE_BIN" "$@"',
+  ].join("; ");
   const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
-  return `curl -fsSL ${UNIX_INSTALL_SCRIPT_URL} | sh && "$HOME/.ite/bin/ite"${runArgs}`;
+  return `sh -c ${shellQuote(script)} sh${runArgs}`;
 }
 
 async function installRuntime() {
