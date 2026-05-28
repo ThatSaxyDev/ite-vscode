@@ -145,6 +145,9 @@ function getTerminalOptions(runtime) {
     cwd: getWorkspaceCwd(),
     shellPath: runtime.executable,
     shellArgs: getIteArgs(),
+    location: {
+      viewColumn: vscode.ViewColumn.Beside,
+    },
   };
 }
 
@@ -240,6 +243,9 @@ function getInstallTerminalOptions() {
   const options = {
     name: "iTE",
     cwd: getWorkspaceCwd(),
+    location: {
+      viewColumn: vscode.ViewColumn.Beside,
+    },
   };
 
   if (process.platform === "win32") {

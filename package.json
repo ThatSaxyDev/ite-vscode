@@ -1,11 +1,11 @@
 {
-  "name": "ite-vscode",
+  "name": "ite",
   "displayName": "iTE",
-  "description": "Run iTE, the AI coding agent for your terminal, directly inside VS Code.",
+  "description": "Run iTE in a dedicated VS Code terminal.",
   "version": "0.0.1",
-  "publisher": "kiishi",
+  "publisher": "IteoluwakiishiDedeke",
   "license": "MIT",
-  "icon": "media/ite-icon.png",
+  "icon": "media/ite-large.png",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -34,12 +34,7 @@
     "theme": "dark"
   },
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:ite.checkInstallation",
-    "onCommand:ite.installRuntime",
-    "onCommand:ite.openTerminal",
-    "onCommand:ite.openNewTerminal",
-    "onTerminalProfile:ite.terminalProfile"
+    "onStartupFinished"
   ],
   "main": "./extension.js",
   "scripts": {
@@ -56,33 +51,12 @@
         "command": "ite.openTerminal",
         "title": "Open iTE",
         "category": "iTE"
-      },
-      {
-        "command": "ite.openNewTerminal",
-        "title": "Open New iTE Terminal",
-        "category": "iTE"
-      },
-      {
-        "command": "ite.checkInstallation",
-        "title": "Check Installation",
-        "category": "iTE"
-      },
-      {
-        "command": "ite.installRuntime",
-        "title": "Install iTE",
-        "category": "iTE"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "ite.openTerminal"
-        },
-        {
-          "command": "ite.checkInstallation"
-        },
-        {
-          "command": "ite.installRuntime"
         }
       ],
       "terminal/title": [
@@ -100,55 +74,6 @@
           "icon": "terminal"
         }
       ]
-    },
-    "walkthroughs": [
-      {
-        "id": "ite.getStarted",
-        "title": "Get Started with iTE",
-        "description": "Open iTE directly from VS Code.",
-        "steps": [
-          {
-            "id": "check-install",
-            "title": "Check the iTE CLI",
-            "description": "Verify that VS Code can find or install iTE.\n[Check Installation](command:ite.checkInstallation)",
-            "media": {
-              "markdown": "media/check-install.md"
-            },
-            "completionEvents": [
-              "onCommand:ite.checkInstallation"
-            ]
-          },
-          {
-            "id": "open-ite",
-            "title": "Open iTE",
-            "description": "Start iTE in a dedicated VS Code terminal.\n[Open iTE](command:ite.openTerminal)",
-            "media": {
-              "markdown": "media/open-ite.md"
-            },
-            "completionEvents": [
-              "onCommand:ite.openTerminal"
-            ]
-          }
-        ]
-      }
-    ],
-    "configuration": {
-      "title": "iTE",
-      "properties": {
-        "ite.executable": {
-          "type": "string",
-          "default": "ite",
-          "description": "iTE executable to run. Use a full path if VS Code cannot find `ite` on PATH."
-        },
-        "ite.args": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "Arguments passed to the iTE executable."
-        }
-      }
     }
   }
 }
