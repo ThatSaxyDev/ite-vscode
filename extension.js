@@ -1,10 +1,14 @@
 const vscode = require("vscode");
+const crypto = require("crypto");
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
 const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
-const UNIX_INSTALL_SCRIPT_URL = "https://ite.kiishi.space/install.sh";
-const WINDOWS_INSTALL_SCRIPT_URL = "https://ite.kiishi.space/install.ps1";
+const fsp = fs.promises;
+const RELEASE_MANIFEST_URL = "https://ite.kiishi.space/releases/manifest.json";
 
 let currentTerminal;
 let statusBarItem;
@@ -64,12 +68,16 @@ function getIteArgs() {
 }
 
 function getDefaultInstalledExecutable() {
+  return path.join(getManagedInstallRoot(), "bin", process.platform === "win32" ? "ite.exe" : "ite");
+}
+
+function getManagedInstallRoot() {
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-    return path.join(localAppData, "iTE", "bin", "ite.exe");
+    return path.join(localAppData, "iTE");
   }
 
-  return path.join(os.homedir(), ".ite", "bin", "ite");
+  return path.join(os.homedir(), ".ite");
 }
 
 function getRuntimeCandidates() {
@@ -108,6 +116,23 @@ function checkExecutable(executable) {
         installed: true,
         executable,
         message: String(stdout || stderr).trim(),
+      });
+    });
+  });
+}
+
+function execFileAsync(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        const details = String(stderr || stdout || error.message).trim();
+        reject(new Error(details || error.message));
+        return;
+      }
+
+      resolve({
+        stdout: String(stdout || ""),
+        stderr: String(stderr || ""),
       });
     });
   });
@@ -231,73 +256,282 @@ async function checkInstallation() {
   }
 }
 
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
-}
+function getTargetKey() {
+  const osName = process.platform;
+  const archName = process.arch === "x64" ? "x64" : process.arch;
 
-function powershellQuote(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function getInstallTerminalOptions() {
-  const options = {
-    name: "iTE",
-    cwd: getWorkspaceCwd(),
-    location: {
-      viewColumn: vscode.ViewColumn.Beside,
-    },
-  };
-
-  if (process.platform === "win32") {
-    options.shellPath = "powershell.exe";
-    options.shellArgs = ["-NoProfile"];
+  if (!["darwin", "linux", "win32"].includes(osName)) {
+    throw new Error(`iTE is not available for ${osName}.`);
   }
 
-  return options;
-}
-
-function getInstallAndRunCommand() {
-  const args = getIteArgs();
-
-  if (process.platform === "win32") {
-    const quotedArgs = args.map(powershellQuote).join(" ");
-    const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
-    return [
-      "$ErrorActionPreference = 'Stop'",
-      `irm ${WINDOWS_INSTALL_SCRIPT_URL} | iex`,
-      "$ite = Join-Path $env:LOCALAPPDATA 'iTE\\bin\\ite.exe'",
-      `if (Test-Path $ite) { & $ite${runArgs} } else { Write-Error 'iTE installed, but the executable was not found.' }`,
-    ].join("; ");
+  if (!["arm64", "x64"].includes(archName)) {
+    throw new Error(`iTE is not available for ${osName}-${archName}.`);
   }
 
-  const quotedArgs = args.map(shellQuote).join(" ");
-  const script = [
-    "set -e",
-    'INSTALLER="$(mktemp)"',
-    'trap \'rm -f "$INSTALLER"\' EXIT',
-    `curl -fsSL ${UNIX_INSTALL_SCRIPT_URL} -o "$INSTALLER"`,
-    'sh "$INSTALLER"',
-    'ITE_BIN="$HOME/.ite/bin/ite"',
-    'test -x "$ITE_BIN" || { echo "iTE installer finished, but $ITE_BIN was not found." >&2; exit 1; }',
-    'exec "$ITE_BIN" "$@"',
-  ].join("; ");
-  const runArgs = quotedArgs ? ` ${quotedArgs}` : "";
-  return `sh -c ${shellQuote(script)} sh${runArgs}`;
+  return `${osName}-${archName}`;
+}
+
+function requestUrl(url, onResponse, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith("https:") ? https : http;
+    const request = client.get(
+      url,
+      {
+        headers: {
+          "User-Agent": "iTE VS Code",
+        },
+      },
+      (response) => {
+        const location = response.headers.location;
+        if (
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          location &&
+          redirects < 5
+        ) {
+          response.resume();
+          resolve(requestUrl(new URL(location, url).toString(), onResponse, redirects + 1));
+          return;
+        }
+
+        if (response.statusCode !== 200) {
+          response.resume();
+          reject(new Error(`Request failed with HTTP ${response.statusCode}: ${url}`));
+          return;
+        }
+
+        resolve(onResponse(response));
+      },
+    );
+
+    request.setTimeout(30000, () => {
+      request.destroy(new Error(`Request timed out: ${url}`));
+    });
+    request.on("error", reject);
+  });
+}
+
+async function downloadJson(url) {
+  return requestUrl(
+    url,
+    (response) =>
+      new Promise((resolve, reject) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch (error) {
+            reject(new Error(`Invalid release manifest: ${error.message}`));
+          }
+        });
+        response.on("error", reject);
+      }),
+  );
+}
+
+async function downloadFile(url, destination, progress) {
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+
+  return requestUrl(
+    url,
+    (response) =>
+      new Promise((resolve, reject) => {
+        const total = Number(response.headers["content-length"] || 0);
+        let received = 0;
+        let lastReport = 0;
+        const output = fs.createWriteStream(destination);
+
+        response.on("data", (chunk) => {
+          received += chunk.length;
+          if (total > 0 && received - lastReport > 1024 * 1024) {
+            lastReport = received;
+            progress.report({
+              message: `Downloading ${Math.round((received / total) * 100)}%`,
+            });
+          }
+        });
+
+        response.pipe(output);
+        output.on("finish", () => output.close(resolve));
+        output.on("error", reject);
+        response.on("error", reject);
+      }),
+  );
+}
+
+async function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const input = fs.createReadStream(filePath);
+    input.on("data", (chunk) => hash.update(chunk));
+    input.on("end", () => resolve(hash.digest("hex")));
+    input.on("error", reject);
+  });
+}
+
+async function readFirstLine(filePath) {
+  try {
+    const value = await fsp.readFile(filePath, "utf8");
+    return value.split(/\r?\n/, 1)[0].trim();
+  } catch {
+    return "";
+  }
+}
+
+async function findExecutable(root, executableName) {
+  const entries = await fsp.readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      const found = await findExecutable(fullPath, executableName);
+      if (found) {
+        return found;
+      }
+    } else if (entry.name === executableName) {
+      return fullPath;
+    }
+  }
+
+  return undefined;
+}
+
+async function copyDirectoryContents(source, destination) {
+  await fsp.mkdir(destination, { recursive: true });
+  const entries = await fsp.readdir(source);
+  for (const entry of entries) {
+    await fsp.cp(path.join(source, entry), path.join(destination, entry), {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+async function installArtifact(archivePath, asset, version) {
+  if (asset.archiveType !== "tar.gz") {
+    throw new Error(`Unsupported iTE archive type: ${asset.archiveType || "unknown"}`);
+  }
+
+  const installRoot = getManagedInstallRoot();
+  const appDir = path.join(installRoot, "app");
+  const binDir = path.join(installRoot, "bin");
+  const binPath = getDefaultInstalledExecutable();
+  const stampPath = path.join(installRoot, ".sha256");
+  const extractDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ite-install-"));
+
+  try {
+    await execFileAsync("tar", ["-xzf", archivePath, "-C", extractDir]);
+    const children = await fsp.readdir(extractDir, { withFileTypes: true });
+    const extracted = children.find((entry) => entry.isDirectory());
+    if (!extracted) {
+      throw new Error("iTE archive extraction produced an unexpected layout.");
+    }
+
+    await fsp.rm(appDir, { recursive: true, force: true });
+    await fsp.mkdir(binDir, { recursive: true });
+    await copyDirectoryContents(path.join(extractDir, extracted.name), appDir);
+
+    const executable = await findExecutable(appDir, asset.executable || "ite");
+    if (!executable) {
+      throw new Error("iTE executable was not found after extraction.");
+    }
+
+    await fsp.chmod(executable, 0o755).catch(() => undefined);
+    await fsp.rm(binPath, { force: true });
+    try {
+      const relativeExecutable = path.relative(binDir, executable);
+      await fsp.symlink(relativeExecutable, binPath);
+    } catch {
+      await fsp.copyFile(executable, binPath);
+      await fsp.chmod(binPath, 0o755).catch(() => undefined);
+    }
+
+    await fsp.writeFile(stampPath, `${asset.sha256 || ""}\nversion=${version || ""}\n`, "utf8");
+    return binPath;
+  } finally {
+    await fsp.rm(extractDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function installManagedRuntime(progress) {
+  progress.report({ message: "Checking latest release" });
+  const manifest = await downloadJson(RELEASE_MANIFEST_URL);
+  const target = getTargetKey();
+  const asset = manifest && manifest.assets && manifest.assets[target];
+  if (!asset || !asset.url) {
+    throw new Error(`No iTE build is available for ${target}.`);
+  }
+
+  const installRoot = getManagedInstallRoot();
+  const stampPath = path.join(installRoot, ".sha256");
+  const binPath = getDefaultInstalledExecutable();
+  const existingStamp = await readFirstLine(stampPath);
+  if (asset.sha256 && existingStamp === asset.sha256) {
+    const existing = await checkExecutable(binPath);
+    if (existing.installed) {
+      return binPath;
+    }
+  }
+
+  const archivePath = path.join(
+    os.tmpdir(),
+    `ite-${manifest.version || "latest"}-${target}.${asset.archiveType === "zip" ? "zip" : "tar.gz"}`,
+  );
+
+  try {
+    progress.report({ message: `Downloading iTE ${manifest.version || ""}`.trim() });
+    await fsp.rm(archivePath, { force: true });
+    await downloadFile(asset.url, archivePath, progress);
+
+    if (asset.sha256) {
+      progress.report({ message: "Verifying download" });
+      const actual = await sha256File(archivePath);
+      if (actual !== asset.sha256) {
+        throw new Error("Downloaded iTE archive failed checksum verification.");
+      }
+    }
+
+    progress.report({ message: "Installing iTE" });
+    return await installArtifact(archivePath, asset, manifest.version);
+  } finally {
+    await fsp.rm(archivePath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function installRuntime() {
-  const terminal = vscode.window.createTerminal(getInstallTerminalOptions());
-  currentTerminal = terminal;
-  terminal.show();
-  terminal.sendText(getInstallAndRunCommand(), true);
   setRuntimeState({
     installed: false,
     source: "installer",
-    message: "Installing iTE in the terminal.",
+    message: "Installing iTE.",
   });
-  await vscode.window.showInformationMessage(
-    "The iTE installer is running in the terminal. iTE will start there after installation completes.",
+
+  const executable = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Installing iTE",
+      cancellable: false,
+    },
+    installManagedRuntime,
   );
+
+  await fsp.access(executable, fs.constants.X_OK);
+
+  const runtime = {
+    installed: true,
+    executable,
+    message: "Installed iTE.",
+    source: "installed",
+  };
+
+  setRuntimeState({
+    ...runtime,
+    source: "installed",
+  });
+
+  await createIteTerminal({
+    ...runtime,
+    source: "installed",
+  });
   return undefined;
 }
 
@@ -366,7 +600,7 @@ async function showWelcomeOnce(context) {
   }
 
   const action = await vscode.window.showInformationMessage(
-    "Install iTE to use the AI coding agent directly inside VS Code.",
+    "Install iTE to use the AI coding agent in a dedicated VS Code terminal.",
     "Install iTE",
     "Open Docs",
   );
