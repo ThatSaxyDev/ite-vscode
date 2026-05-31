@@ -8,6 +8,9 @@ If iTE is not installed, the extension asks before installing the official relea
 
 Open iTE from the status bar or Command Palette.
 
+By default, iTE resumes the most recent saved session for the current workspace.
+Set `ite.resumeLastSession` to `false` if you prefer every dedicated terminal to start on an empty chat.
+
 ## Docs
 
 Learn more at [ite.kiishi.space/docs](https://ite.kiishi.space/docs).

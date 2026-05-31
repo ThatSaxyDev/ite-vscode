@@ -9,10 +9,12 @@ const { execFile } = require("child_process");
 
 const fsp = fs.promises;
 const RELEASE_MANIFEST_URL = "https://ite.kiishi.space/releases/manifest.json";
+const LAST_PROMPTED_UPDATE_KEY = "ite.lastPromptedRuntimeUpdate";
 
 let currentTerminal;
 let statusBarItem;
 let lastRuntimeState;
+let runtimeUpdateCheckInFlight = false;
 
 function isCancellation(error) {
   return (
@@ -61,10 +63,18 @@ function getSystemExecutable() {
 function getIteArgs() {
   const configuredArgs = getConfig().get("args", []);
   if (!Array.isArray(configuredArgs)) {
-    return [];
+    return shouldResumeLastSession() ? ["--resume-last"] : [];
   }
 
-  return configuredArgs.filter((arg) => typeof arg === "string");
+  const args = configuredArgs.filter((arg) => typeof arg === "string");
+  if (shouldResumeLastSession() && !args.includes("--resume-last")) {
+    args.push("--resume-last");
+  }
+  return args;
+}
+
+function shouldResumeLastSession() {
+  return getConfig().get("resumeLastSession", true) === true;
 }
 
 function getDefaultInstalledExecutable() {
@@ -379,6 +389,72 @@ async function readFirstLine(filePath) {
   }
 }
 
+async function readManagedInstallMetadata() {
+  const stampPath = path.join(getManagedInstallRoot(), ".sha256");
+  try {
+    const value = await fsp.readFile(stampPath, "utf8");
+    const lines = value.split(/\r?\n/);
+    const metadata = {
+      sha256: lines[0] ? lines[0].trim() : "",
+      version: "",
+    };
+
+    for (const line of lines.slice(1)) {
+      const [key, ...rest] = line.split("=");
+      if (key === "version") {
+        metadata.version = rest.join("=").trim();
+      }
+    }
+
+    return metadata;
+  } catch {
+    return {
+      sha256: "",
+      version: "",
+    };
+  }
+}
+
+function parseVersion(text) {
+  const match = String(text || "").match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match ? match[1] : "";
+}
+
+function compareVersions(a, b) {
+  const parse = (value) =>
+    String(value || "")
+      .split(/[.-]/)
+      .map((part) => Number.parseInt(part, 10))
+      .map((part) => (Number.isFinite(part) ? part : 0));
+  const left = parse(a);
+  const right = parse(b);
+  const length = Math.max(left.length, right.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left[index] || 0) - (right[index] || 0);
+    if (diff !== 0) {
+      return diff > 0 ? 1 : -1;
+    }
+  }
+
+  return 0;
+}
+
+async function getReleaseForCurrentTarget() {
+  const manifest = await downloadJson(RELEASE_MANIFEST_URL);
+  const target = getTargetKey();
+  const asset = manifest && manifest.assets && manifest.assets[target];
+  if (!asset || !asset.url) {
+    throw new Error(`No iTE build is available for ${target}.`);
+  }
+
+  return {
+    manifest,
+    target,
+    asset,
+  };
+}
+
 async function findExecutable(root, executableName) {
   const entries = await fsp.readdir(root, { withFileTypes: true });
   for (const entry of entries) {
@@ -455,12 +531,7 @@ async function installArtifact(archivePath, asset, version) {
 
 async function installManagedRuntime(progress) {
   progress.report({ message: "Checking latest release" });
-  const manifest = await downloadJson(RELEASE_MANIFEST_URL);
-  const target = getTargetKey();
-  const asset = manifest && manifest.assets && manifest.assets[target];
-  if (!asset || !asset.url) {
-    throw new Error(`No iTE build is available for ${target}.`);
-  }
+  const { manifest, target, asset } = await getReleaseForCurrentTarget();
 
   const installRoot = getManagedInstallRoot();
   const stampPath = path.join(installRoot, ".sha256");
@@ -533,6 +604,90 @@ async function installRuntime() {
     source: "installed",
   });
   return undefined;
+}
+
+async function getManagedRuntimeUpdate() {
+  const configuredExecutable = getSystemExecutable();
+  const managedExecutable = getDefaultInstalledExecutable();
+  if (configuredExecutable !== "ite" && configuredExecutable !== managedExecutable) {
+    return undefined;
+  }
+
+  const installed = await checkExecutable(managedExecutable);
+  if (!installed.installed) {
+    return undefined;
+  }
+
+  const { manifest, target, asset } = await getReleaseForCurrentTarget();
+  const installedMetadata = await readManagedInstallMetadata();
+  const installedVersion = installedMetadata.version || parseVersion(installed.message);
+  const latestVersion = manifest.version || "";
+  const latestSha = asset.sha256 || "";
+  const updateKey = `${target}:${latestVersion}:${latestSha}`;
+
+  if (latestSha && installedMetadata.sha256) {
+    if (latestSha === installedMetadata.sha256) {
+      return undefined;
+    }
+
+    return {
+      updateKey,
+      installedVersion,
+      latestVersion,
+      latestSha,
+    };
+  }
+
+  if (latestVersion && installedVersion && compareVersions(latestVersion, installedVersion) > 0) {
+    return {
+      updateKey,
+      installedVersion,
+      latestVersion,
+      latestSha,
+    };
+  }
+
+  return undefined;
+}
+
+async function checkRuntimeUpdate(context) {
+  if (runtimeUpdateCheckInFlight) {
+    return;
+  }
+
+  runtimeUpdateCheckInFlight = true;
+  try {
+    const update = await getManagedRuntimeUpdate();
+    if (!update) {
+      return;
+    }
+
+    if (context.globalState.get(LAST_PROMPTED_UPDATE_KEY) === update.updateKey) {
+      return;
+    }
+
+    const versionCopy = update.latestVersion
+      ? `iTE ${update.latestVersion} is available.`
+      : "A newer iTE runtime is available.";
+    const action = await vscode.window.showInformationMessage(
+      `${versionCopy} Update the VS Code runtime?`,
+      "Update iTE",
+      "Later",
+      "Open Docs",
+    );
+
+    if (action === "Update iTE") {
+      await installRuntime();
+      await context.globalState.update(LAST_PROMPTED_UPDATE_KEY, update.updateKey);
+    } else if (action === "Open Docs") {
+      await context.globalState.update(LAST_PROMPTED_UPDATE_KEY, update.updateKey);
+      await vscode.env.openExternal(vscode.Uri.parse("https://ite.kiishi.space/docs"));
+    } else if (action === "Later") {
+      await context.globalState.update(LAST_PROMPTED_UPDATE_KEY, update.updateKey);
+    }
+  } finally {
+    runtimeUpdateCheckInFlight = false;
+  }
 }
 
 function registerTerminalProfile(context) {
@@ -626,6 +781,9 @@ function activate(context) {
   registerStatusBar(context);
   void refreshRuntimeState().catch(handleCommandError);
   void showWelcomeOnce(context).catch(handleCommandError);
+  setTimeout(() => {
+    void checkRuntimeUpdate(context).catch(() => undefined);
+  }, 5000);
 
   context.subscriptions.push(
     vscode.window.onDidCloseTerminal((terminal) => {

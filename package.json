@@ -2,7 +2,7 @@
   "name": "ite-agent",
   "displayName": "iTE: the agent",
   "description": "Run iTE in a dedicated VS Code terminal.",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "IteoluwakiishiDedeke",
   "license": "MIT",
   "icon": "media/ite-large.png",
@@ -53,6 +53,29 @@
         "category": "iTE"
       }
     ],
+    "configuration": {
+      "title": "iTE",
+      "properties": {
+        "ite.executable": {
+          "type": "string",
+          "default": "ite",
+          "description": "Path or command used to launch the iTE runtime."
+        },
+        "ite.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional command-line arguments passed to the iTE runtime."
+        },
+        "ite.resumeLastSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resume the most recent saved iTE session for the current workspace when opening the dedicated terminal."
+        }
+      }
+    },
     "menus": {
       "commandPalette": [
         {
