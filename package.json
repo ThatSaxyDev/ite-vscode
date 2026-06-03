@@ -1,6 +1,6 @@
 {
-  "name": "ite-agent",
-  "displayName": "iTE: the agent",
+  "name": "ite-the-agent",
+  "displayName": "iTE, the agent",
   "description": "Run iTE in a dedicated VS Code terminal.",
   "version": "0.0.1",
   "publisher": "DedekeDavidIteoluwakiisi",
