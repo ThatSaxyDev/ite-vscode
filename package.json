@@ -2,8 +2,8 @@
   "name": "ite-agent",
   "displayName": "iTE: the agent",
   "description": "Run iTE in a dedicated VS Code terminal.",
-  "version": "0.0.3",
-  "publisher": "IteoluwakiishiDedeke",
+  "version": "0.0.1",
+  "publisher": "DedekeDavidIteoluwakiisi",
   "license": "MIT",
   "icon": "media/ite-large.png",
   "engines": {
@@ -23,10 +23,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/kiishidavid/ite-vscode"
+    "url": "https://github.com/ThatSaxyDev/ite-vscode"
   },
   "bugs": {
-    "url": "https://github.com/kiishidavid/ite-vscode/issues"
+    "url": "https://github.com/ThatSaxyDev/ite-vscode/issues"
   },
   "homepage": "https://ite.kiishi.space",
   "galleryBanner": {
@@ -50,6 +50,16 @@
       {
         "command": "ite.openTerminal",
         "title": "Open iTE",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.openNewTerminal",
+        "title": "Open iTE: New Terminal",
+        "category": "iTE"
+      },
+      {
+        "command": "ite.resumeLastSession",
+        "title": "Open iTE: Last Session",
         "category": "iTE"
       }
     ],
@@ -80,6 +90,12 @@
       "commandPalette": [
         {
           "command": "ite.openTerminal"
+        },
+        {
+          "command": "ite.openNewTerminal"
+        },
+        {
+          "command": "ite.resumeLastSession"
         }
       ],
       "terminal/title": [

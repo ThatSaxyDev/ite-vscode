@@ -73,6 +73,25 @@ function getIteArgs() {
   return args;
 }
 
+function getNewTerminalArgs() {
+  const configuredArgs = getConfig().get("args", []);
+  const args = Array.isArray(configuredArgs)
+    ? configuredArgs.filter((arg) => typeof arg === "string")
+    : [];
+  return args.filter((arg) => arg !== "--resume-last");
+}
+
+function getResumeArgs() {
+  const configuredArgs = getConfig().get("args", []);
+  const args = Array.isArray(configuredArgs)
+    ? configuredArgs.filter((arg) => typeof arg === "string")
+    : [];
+  if (!args.includes("--resume-last")) {
+    args.push("--resume-last");
+  }
+  return args;
+}
+
 function shouldResumeLastSession() {
   return getConfig().get("resumeLastSession", true) === true;
 }
@@ -174,20 +193,20 @@ function setRuntimeState(result) {
   updateStatusBar(result);
 }
 
-function getTerminalOptions(runtime) {
+function getTerminalOptions(runtime, shellArgs) {
   return {
     name: "iTE",
     cwd: getWorkspaceCwd(),
     shellPath: runtime.executable,
-    shellArgs: getIteArgs(),
+    shellArgs: shellArgs || getIteArgs(),
     location: {
       viewColumn: vscode.ViewColumn.Beside,
     },
   };
 }
 
-async function createIteTerminal(runtime) {
-  currentTerminal = vscode.window.createTerminal(getTerminalOptions(runtime));
+async function createIteTerminal(runtime, shellArgs) {
+  currentTerminal = vscode.window.createTerminal(getTerminalOptions(runtime, shellArgs));
   currentTerminal.show();
 }
 
@@ -237,7 +256,21 @@ async function openNewTerminal() {
     return;
   }
 
-  await createIteTerminal(runtime);
+  await createIteTerminal(runtime, getNewTerminalArgs());
+}
+
+async function resumeLastSession() {
+  if (currentTerminal) {
+    currentTerminal.show();
+    return;
+  }
+
+  const runtime = await ensureRuntimeOrPrompt();
+  if (!runtime || !runtime.installed) {
+    return;
+  }
+
+  await createIteTerminal(runtime, getResumeArgs());
 }
 
 async function checkInstallation() {
@@ -810,6 +843,7 @@ async function refreshRuntimeState() {
 function activate(context) {
   registerCommand(context, "ite.openTerminal", openTerminal);
   registerCommand(context, "ite.openNewTerminal", openNewTerminal);
+  registerCommand(context, "ite.resumeLastSession", resumeLastSession);
   registerCommand(context, "ite.checkInstallation", checkInstallation);
   registerCommand(context, "ite.installRuntime", installRuntime);
   registerTerminalProfile(context);
