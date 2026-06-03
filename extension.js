@@ -767,6 +767,41 @@ async function showWelcomeOnce(context) {
   }
 }
 
+function isIteTerminalActive() {
+  const iteTerminal = vscode.window.terminals.find(
+    (t) => t.name === "iTE" && t.status === vscode.TerminalStatus.Running && t.visible,
+  );
+  return !!iteTerminal;
+}
+
+function isIteInstalled() {
+  return lastRuntimeState && lastRuntimeState.installed;
+}
+
+async function promptResumeSession(context) {
+  if (!shouldResumeLastSession()) {
+    return;
+  }
+
+  if (isIteTerminalActive()) {
+    return;
+  }
+
+  if (!isIteInstalled()) {
+    return;
+  }
+
+  const action = await vscode.window.showInformationMessage(
+    "Welcome back! Ready to pick up where you left off?",
+    "Resume Session",
+    "Dismiss",
+  );
+
+  if (action === "Resume Session") {
+    await openTerminal();
+  }
+}
+
 async function refreshRuntimeState() {
   const runtime = await resolveRuntime();
   setRuntimeState(runtime);
@@ -789,6 +824,11 @@ function activate(context) {
     vscode.window.onDidCloseTerminal((terminal) => {
       if (terminal === currentTerminal) {
         currentTerminal = undefined;
+      }
+    }),
+    vscode.window.onDidChangeWindowState((windowState) => {
+      if (windowState.focused) {
+        void promptResumeSession(context);
       }
     }),
   );
