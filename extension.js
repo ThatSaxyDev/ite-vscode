@@ -769,6 +769,16 @@ function registerStatusBar(context) {
 async function showWelcomeOnce(context) {
   const key = "ite.welcomeShown";
   if (context.globalState.get(key)) {
+    if (!isIteInstalled()) {
+      const action = await vscode.window.showWarningMessage(
+        "iTE is not installed. Install it to use the AI coding agent in VS Code.",
+        "Install iTE",
+      );
+
+      if (action === "Install iTE") {
+        await installRuntime();
+      }
+    }
     return;
   }
 
@@ -856,8 +866,10 @@ function activate(context) {
   registerCommand(context, "ite.installRuntime", installRuntime);
   registerTerminalProfile(context);
   registerStatusBar(context);
-  void refreshRuntimeState().catch(handleCommandError);
-  void showWelcomeOnce(context).catch(handleCommandError);
+  refreshRuntimeState()
+    .then(() => showWelcomeOnce(context))
+    .then(() => promptResumeSession(context))
+    .catch(handleCommandError);
   setTimeout(() => {
     void checkRuntimeUpdate(context).catch(() => undefined);
   }, 5000);
