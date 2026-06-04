@@ -800,13 +800,6 @@ async function showWelcomeOnce(context) {
   }
 }
 
-function isIteTerminalActive() {
-  const iteTerminal = vscode.window.terminals.find(
-    (t) => t.name === "iTE" && t.status === vscode.TerminalStatus.Running && t.visible,
-  );
-  return !!iteTerminal;
-}
-
 function isIteInstalled() {
   return lastRuntimeState && lastRuntimeState.installed;
 }
@@ -816,11 +809,19 @@ async function promptResumeSession(context) {
     return;
   }
 
-  if (isIteTerminalActive()) {
+  if (!isIteInstalled()) {
     return;
   }
 
-  if (!isIteInstalled()) {
+  if (currentTerminal) {
+    currentTerminal.show();
+    return;
+  }
+
+  const existingIteTerminal = vscode.window.terminals.find((t) => t.name === "iTE");
+  if (existingIteTerminal) {
+    currentTerminal = existingIteTerminal;
+    existingIteTerminal.show();
     return;
   }
 
@@ -831,7 +832,7 @@ async function promptResumeSession(context) {
   );
 
   if (action === "Resume Session") {
-    await openTerminal();
+    await resumeLastSession();
   }
 }
 
