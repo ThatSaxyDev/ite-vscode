@@ -702,9 +702,9 @@ async function checkRuntimeUpdate(context) {
 
     const versionCopy = update.latestVersion
       ? `iTE ${update.latestVersion} is available.`
-      : "A newer iTE runtime is available.";
+      : "A newer iTE version is available.";
     const action = await vscode.window.showInformationMessage(
-      `${versionCopy} Update the VS Code runtime?`,
+      `${versionCopy} Update?`,
       "Update iTE",
       "Later",
       "Open Docs",
