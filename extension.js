@@ -10,6 +10,7 @@ const { execFile } = require("child_process");
 const fsp = fs.promises;
 const RELEASE_MANIFEST_URL = "https://ite.kiishi.space/releases/manifest.json";
 const LAST_PROMPTED_UPDATE_KEY = "ite.lastPromptedRuntimeUpdate";
+const RESUME_DISMISSED_KEY = "ite.resumePromptDismissed";
 
 let currentTerminal;
 let statusBarItem;
@@ -825,6 +826,10 @@ async function promptResumeSession(context) {
     return;
   }
 
+  if (context.globalState.get(RESUME_DISMISSED_KEY)) {
+    return;
+  }
+
   const action = await vscode.window.showInformationMessage(
     "Welcome back! Ready to pick up where you left off?",
     "Resume Session",
@@ -833,6 +838,8 @@ async function promptResumeSession(context) {
 
   if (action === "Resume Session") {
     await resumeLastSession();
+  } else if (action === "Dismiss") {
+    await context.globalState.update(RESUME_DISMISSED_KEY, true);
   }
 }
 
