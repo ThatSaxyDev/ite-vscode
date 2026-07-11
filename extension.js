@@ -10,7 +10,6 @@ const { execFile } = require("child_process");
 const fsp = fs.promises;
 const RELEASE_MANIFEST_URL = "https://ite.kiishi.space/releases/manifest.json";
 const LAST_PROMPTED_UPDATE_KEY = "ite.lastPromptedRuntimeUpdate";
-const RESUME_DECISION_KEY = "ite.resumeDecision";
 const RESUME_HINT_TIMEOUT_MS = 30_000;
 
 let currentTerminal;
@@ -835,20 +834,6 @@ function isIteInstalled() {
   return lastRuntimeState && lastRuntimeState.installed;
 }
 
-function getResumeDecisionStore(context) {
-  return context.workspaceState ?? context.globalState;
-}
-
-async function getResumeDecision(context) {
-  const store = getResumeDecisionStore(context);
-  return store.get(RESUME_DECISION_KEY);
-}
-
-async function setResumeDecision(context, decision) {
-  const store = getResumeDecisionStore(context);
-  await store.update(RESUME_DECISION_KEY, decision);
-}
-
 function dismissResumeHint(reason) {
   if (!resumeHintItem) {
     return;
@@ -862,10 +847,7 @@ function dismissResumeHint(reason) {
   if (reason === "deactivate") {
     return;
   }
-  if (contextRef && (reason === "skipped" || reason === "resume")) {
-    void setResumeDecision(contextRef, reason).catch(() => undefined);
   }
-}
 
 function showResumeHint() {
   if (resumeHintItem) {
@@ -894,6 +876,16 @@ function showResumeHint() {
   }, RESUME_HINT_TIMEOUT_MS);
 }
 
+async function showResumeNotification() {
+  const action = await vscode.window.showInformationMessage(
+    "Resume your last iTE session in a dedicated VS Code terminal.",
+    "Open iTE",
+  );
+  if (action === "Open iTE") {
+    await resumeLastSession();
+  }
+}
+
 async function promptResumeSession(context) {
   if (!isResumePromptEnabled()) {
     if (getResumeMode() === "auto") {
@@ -918,11 +910,7 @@ async function promptResumeSession(context) {
     return;
   }
 
-  const decision = await getResumeDecision(context);
-  if (decision) {
-    return;
-  }
-
+  void showResumeNotification();
   showResumeHint();
 }
 

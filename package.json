@@ -2,7 +2,7 @@
   "name": "ite-the-agent",
   "displayName": "iTE, the agent",
   "description": "Run iTE in a dedicated VS Code terminal.",
-  "version": "0.0.6",
+  "version": "0.0.8",
   "publisher": "DedekeDavidIteoluwakiisi",
   "license": "MIT",
   "icon": "media/ite-large.png",
