@@ -10,12 +10,16 @@ const { execFile } = require("child_process");
 const fsp = fs.promises;
 const RELEASE_MANIFEST_URL = "https://ite.kiishi.space/releases/manifest.json";
 const LAST_PROMPTED_UPDATE_KEY = "ite.lastPromptedRuntimeUpdate";
-const RESUME_DISMISSED_KEY = "ite.resumePromptDismissed";
+const RESUME_DECISION_KEY = "ite.resumeDecision";
+const RESUME_HINT_TIMEOUT_MS = 30_000;
 
 let currentTerminal;
 let statusBarItem;
+let resumeHintItem;
 let lastRuntimeState;
 let runtimeUpdateCheckInFlight = false;
+let contextRef;
+let resumeHintTimer;
 
 function isCancellation(error) {
   return (
@@ -94,7 +98,20 @@ function getResumeArgs() {
 }
 
 function shouldResumeLastSession() {
-  return getConfig().get("resumeLastSession", true) === true;
+  return getResumeMode() !== "never";
+}
+
+function getResumeMode() {
+  const config = getConfig();
+  if (config.get("resumeLastSession", true) === false) {
+    return "never";
+  }
+  const mode = config.get("resumePromptMode", "ask");
+  return mode === "auto" || mode === "never" ? mode : "ask";
+}
+
+function isResumePromptEnabled() {
+  return getResumeMode() === "ask";
 }
 
 function getDefaultInstalledExecutable() {
@@ -248,6 +265,7 @@ async function openTerminal() {
     return;
   }
 
+  dismissResumeHint("skipped");
   await createIteTerminal(runtime);
 }
 
@@ -257,6 +275,7 @@ async function openNewTerminal() {
     return;
   }
 
+  dismissResumeHint("skipped");
   await createIteTerminal(runtime, getNewTerminalArgs());
 }
 
@@ -271,6 +290,7 @@ async function resumeLastSession() {
     return;
   }
 
+  dismissResumeHint("resume");
   await createIteTerminal(runtime, getResumeArgs());
 }
 
@@ -815,8 +835,70 @@ function isIteInstalled() {
   return lastRuntimeState && lastRuntimeState.installed;
 }
 
+function getResumeDecisionStore(context) {
+  return context.workspaceState ?? context.globalState;
+}
+
+async function getResumeDecision(context) {
+  const store = getResumeDecisionStore(context);
+  return store.get(RESUME_DECISION_KEY);
+}
+
+async function setResumeDecision(context, decision) {
+  const store = getResumeDecisionStore(context);
+  await store.update(RESUME_DECISION_KEY, decision);
+}
+
+function dismissResumeHint(reason) {
+  if (!resumeHintItem) {
+    return;
+  }
+  resumeHintItem.hide();
+  resumeHintItem.dispose();
+  resumeHintItem = undefined;
+  if (reason === "timeout") {
+    return;
+  }
+  if (reason === "deactivate") {
+    return;
+  }
+  if (contextRef && (reason === "skipped" || reason === "resume")) {
+    void setResumeDecision(contextRef, reason).catch(() => undefined);
+  }
+}
+
+function showResumeHint() {
+  if (resumeHintItem) {
+    return;
+  }
+
+  resumeHintItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    99,
+  );
+  resumeHintItem.name = "iTE Resume Hint";
+  resumeHintItem.text = "$(history) iTE: resume last session?";
+  resumeHintItem.tooltip = "Click to resume your last iTE session.";
+  resumeHintItem.command = {
+    title: "Resume iTE Session",
+    command: "ite.resumeLastSession",
+  };
+  resumeHintItem.show();
+
+  if (resumeHintTimer) {
+    clearTimeout(resumeHintTimer);
+  }
+  resumeHintTimer = setTimeout(() => {
+    resumeHintTimer = undefined;
+    dismissResumeHint("timeout");
+  }, RESUME_HINT_TIMEOUT_MS);
+}
+
 async function promptResumeSession(context) {
-  if (!shouldResumeLastSession()) {
+  if (!isResumePromptEnabled()) {
+    if (getResumeMode() === "auto") {
+      await resumeLastSession();
+    }
     return;
   }
 
@@ -836,21 +918,12 @@ async function promptResumeSession(context) {
     return;
   }
 
-  if (context.globalState.get(RESUME_DISMISSED_KEY)) {
+  const decision = await getResumeDecision(context);
+  if (decision) {
     return;
   }
 
-  const action = await vscode.window.showInformationMessage(
-    "Welcome back! Ready to pick up where you left off?",
-    "Resume Session",
-    "Dismiss",
-  );
-
-  if (action === "Resume Session") {
-    await resumeLastSession();
-  } else if (action === "Dismiss") {
-    await context.globalState.update(RESUME_DISMISSED_KEY, true);
-  }
+  showResumeHint();
 }
 
 async function refreshRuntimeState() {
@@ -859,6 +932,7 @@ async function refreshRuntimeState() {
 }
 
 function activate(context) {
+  contextRef = context;
   registerCommand(context, "ite.openTerminal", openTerminal);
   registerCommand(context, "ite.openNewTerminal", openNewTerminal);
   registerCommand(context, "ite.resumeLastSession", resumeLastSession);
@@ -880,16 +954,16 @@ function activate(context) {
         currentTerminal = undefined;
       }
     }),
-    vscode.window.onDidChangeWindowState((windowState) => {
-      if (windowState.focused) {
-        void promptResumeSession(context);
-      }
-    }),
   );
 }
 
 function deactivate() {
   statusBarItem = undefined;
+  if (resumeHintTimer) {
+    clearTimeout(resumeHintTimer);
+    resumeHintTimer = undefined;
+  }
+  dismissResumeHint("deactivate");
 }
 
 module.exports = {

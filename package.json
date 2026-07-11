@@ -2,7 +2,7 @@
   "name": "ite-the-agent",
   "displayName": "iTE, the agent",
   "description": "Run iTE in a dedicated VS Code terminal.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "DedekeDavidIteoluwakiisi",
   "license": "MIT",
   "icon": "media/ite-large.png",
@@ -82,7 +82,18 @@
         "ite.resumeLastSession": {
           "type": "boolean",
           "default": true,
-          "description": "Resume the most recent saved iTE session for the current workspace when opening the dedicated terminal."
+          "description": "DEPRECATED: use ite.resumePromptMode instead. When false, iTE never resumes the last session.",
+          "deprecationMessage": "Use ite.resumePromptMode (\"ask\" | \"auto\" | \"never\") instead."
+        },
+        "ite.resumePromptMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto",
+            "never"
+          ],
+          "default": "ask",
+          "markdownDescription": "How iTE handles resuming your last session when the extension activates. `\"ask\"` shows a non-modal status bar hint the first time per workspace and remembers your choice. `\"auto\"` resumes silently. `\"never\"` never resumes."
         }
       }
     },
