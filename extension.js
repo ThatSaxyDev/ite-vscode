@@ -878,11 +878,15 @@ function showResumeHint() {
 
 async function showResumeNotification() {
   const action = await vscode.window.showInformationMessage(
-    "Resume your last iTE session in a dedicated VS Code terminal.",
-    "Open iTE",
+    "Open iTE in a dedicated VS Code terminal.",
+    "Resume Last Session",
+    "New Session",
+    "Cancel",
   );
-  if (action === "Open iTE") {
+  if (action === "Resume Last Session") {
     await resumeLastSession();
+  } else if (action === "New Session") {
+    await openNewTerminal();
   }
 }
 
